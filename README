@@ -1,0 +1,199 @@
+# Cascalog test 
+
+A simple project to experiment cascalogs
+
+## Usage
+
+To start repl that will install all dependencies
+  sublime project.clj and then Tools->Clojure->Clojure, not Clojure-Telnet.
+  lein repl
+
+After start, bring in playground and bootstrap it.
+  (use 'cascalog.playground) (bootstrap)
+
+## Queries
+
+1. select person
+   from person join follows on (person.person = follows.person-followed)
+   join gender
+   where gender = 'm' and follows.person-follower = 'emily'
+
+  (?<- (stdout) [?person] 
+    (follows "emily" ?person)
+    (gender ?person "m"))
+
+2. select person, age, country
+   from person join age on (person.person = age.person)
+        outer-join location on (person.person = location.person)
+   where age < 30
+
+  (?<- (stdout) [?person ?age !country] 
+     (location ?person !country _ _)
+     (age ?person ?age)
+     (< ?age 30))
+
+3. select p1 p2 
+   from person, follows
+   where follows.followed=p1 and follows.followered=p2 and p2.age < p1.age
+
+  (?<- (stdout) [?person1 ?person2] 
+    (follows ?person1 ?person2)
+    (age ?person1 ?age1) (age ?person2 ?age2) (< ?age2 ?age1))     
+
+4. on top of 3, p1, p2 on the same country. 
+
+  (?<- (stdout) [?person1 ?person2 !country1 !country2] 
+    (follows ?person1 ?person2)
+    (age ?person1 ?age1) (age ?person2 ?age2) (< ?age2 ?age1)
+    (location ?person1 !country1 _ _) (location ?person2 !country2 _ _) 
+    (= !country1 !country2))
+
+
+5. Aggregator
+  select count(age)
+  from age 
+  where age < 30
+
+  (?<- (stdout) [?count] 
+    (age _ ?age) (< ?age 30)
+    (c/count ?count))
+
+  (?<- (stdout) [?person ?count] 
+    (follows ?person _)
+    (c/count ?count))
+
+6. multiple aggregators within a single query
+  Average age per country.
+
+  (?<- (stdout) [?country ?avg] 
+    (location ?person ?country _ _) 
+    (age ?person ?age)
+    (c/count ?count) 
+    (c/sum ?age :> ?sum)
+    (div ?sum ?count :> ?avg))
+
+7. def mapcat op that take a single val and ret a seq of tuples. [[tuple1] [tupl2]]
+   deffilterop defines filter operations that return a boolean indicating whether or not to filter a tuple. 
+   defmapop defines functions that return a single tuple. 
+   defaggregateop defines an aggregator.
+  
+  (defmapcatop split [sentence]
+    (seq (.split sentence "\\s+")))
+
+  (?<- (stdout) [?word ?count] (sentence ?s)
+    (split ?s :> ?word) (c/count ?count))
+
+8. Clj fn can be used as operations together with cascalog operators.
+   When given output variables, it is a map operation.
+  (defn lowercase [w] (.toLowerCase w)) 
+  (?<- (stdout) [?word ?count] 
+    (sentence ?s) (split ?s :> ?word1)
+    (lowercase ?word1 :> ?word) (c/count ?count))  
+
+  (defn agebucket [age] 
+    (find-first (partial <= age) [17 25 35 45 55 65 100 200]))
+  (?<- (stdout) [?bucket ?gender ?count] 
+    (age ?person ?age) (gender ?person ?gender)
+    (agebucket ?age :> ?bucket) (c/count ?count))
+
+9. subqueries defined inside let
+  1. all the follow relationships in which both people follow more than 2 people.
+
+  (let [many-follows (<- [?person] 
+                        (follows ?person _)   ; aggregate count of all followers
+                        (c/count ?c) (> ?c 2))]
+    (?<- (stdout) [?person1 ?person2] 
+      (many-follows ?person1)
+      (many-follows ?person2) 
+      (follows ?person1 ?person2)))
+  
+
+10. execute queries that have multiple outputs. use query execution operator to bind query result to output tap.
+
+  (let [many-follows (<- [?person] 
+                        (follows ?person _)
+                        (c/count ?c) (> ?c 2))
+        active-follows (<- [?p1 ?p2] 
+                        (many-follows ?p1)
+                        (many-follows ?p2) 
+                        (follows ?p1 ?p2))]
+    (?- (stdout) 
+      many-follows 
+      (stdout) 
+        active-follows))
+
+
+11. outer-join
+  Outer-joins are triggered by vars that begin with !!, ungrounded variables.
+  Joining two ungrounded vars causes full outer join, while joining ground vars to ungrounded vars triggers left outer join or right outer join.
+
+  (?<- (stdout) [?person1 !!person2]
+    (person ?person1) 
+    (follows ?person1 !!person2))   ; person2 var can have null value. left join.
+
+12. To find person who does NOT have follower
+
+  (?<- (stdout) [?p1 !!p2]
+    (person ?p1)
+    (follows ?p1 !!p2)  ; followers can be null
+    (nil? !!p2))
+
+13. aggregate count followers, null counts as 0.
+  (?<- (stdout) [?person ?count]
+    (person ?person) 
+    (follows ?person !!p2) 
+    (c/!count !!p2 :> ?count))
+
+14. Partitioner decides which reducer the tuples with certain key go to.
+    Combiner is map side aggregation and can be performed in parallel.
+
+    ; def customized aggregator, its like reducer, reduce based on tot and cursor.
+    (defaggregateop product
+      ([] 1)
+      ([total val] (* total val))
+      ([total] [total]))
+
+    (?<- (stdout) [?prod ?count]
+      (integer ?n) 
+      (product ?n :> ?prod)
+      (c/count ?count))
+
+15. Implicit equality constraint, use the same var in both input and output implicitly constraint equal on in and out.
+  (?<- (stdout) [?n] 
+    (integer ?n) 
+    (* ?n ?n :> ?n))
+
+  (?<- (stdout) [?n] 
+    (num-pair ?n ?n))
+
+  ; all pairs, with second val is 2 times of the first value
+  (?<- (output) [?v1 ?v2]
+    (num-pair ?n1 ?n2)
+    (* ?n1 2 :> ?n2))
+
+16. Sorting
+  Aggregator receive tuples in random order. use :sort predicate to sort.
+
+  (defbufferop first-tuple [tuples] 
+    (take 1 tuples))
+
+  (?<- (stdout) [?person ?youngest] 
+    (follows ?person ?p2)
+    (age ?p2 ?age) 
+    (:sort ?age) 
+    (first-tuple ?p2 :> ?youngest))
+
+  (?<- (stdout) [?person ?youngest] 
+    (follows ?person ?p2)
+    (age ?p2 ?age) 
+    (:sort ?age) 
+    (:reverse true)
+    (first-tuple ?p2 :> ?youngest))
+
+17. distinct predicate to control whether to remove duplicate. By default, cascalog will add a reduce step to remove all duplicates, if you do not have aggregators.
+
+  (?<- (stdout) [?a] 
+    (age _ ?a))
+  (?<- (stdout) [?a] 
+    (age _ ?a) (:distinct false))
+
