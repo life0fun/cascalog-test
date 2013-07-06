@@ -11,7 +11,9 @@ To start repl that will install all dependencies
 After start, bring in playground and bootstrap it.
   (use 'cascalog.playground) (bootstrap)
 
-## Queries
+## Query Examples
+
+Examples are based on Nathan's cascalog tutorial.
 
 1. select person
    from person join follows on (person.person = follows.person-followed)
@@ -19,7 +21,7 @@ After start, bring in playground and bootstrap it.
    where gender = 'm' and follows.person-follower = 'emily'
 
   (?<- (stdout) [?person] 
-    (follows "emily" ?person)
+    (follows "emily" ?person)  ; subquery equality by interpolate with hard coded val
     (gender ?person "m"))
 
 2. select person, age, country
@@ -62,6 +64,22 @@ After start, bring in playground and bootstrap it.
     (follows ?person _)
     (c/count ?count))
 
+  Notice the difference, 
+  This outputs 3, aggregate all followers of alice
+    (?<- (stdout) [?cnt] 
+      (follows "alice" ?p2) 
+      (c/count ?cnt))
+
+  This aggregate on each follower, b/c follower is in output field.
+    -----------------------
+    bob 1
+    david 1
+    emily 1
+    -----------------------
+    (?<- (stdout) [?p2 ?cnt] 
+      (follows "alice" ?p2) 
+      (c/count ?cnt))
+
 6. multiple aggregators within a single query
   Average age per country.
 
@@ -80,21 +98,27 @@ After start, bring in playground and bootstrap it.
   (defmapcatop split [sentence]
     (seq (.split sentence "\\s+")))
 
-  (?<- (stdout) [?word ?count] (sentence ?s)
-    (split ?s :> ?word) (c/count ?count))
+  (?<- (stdout) [?word ?count] 
+    (sentence ?s)
+    (split ?s :> ?word) 
+    (c/count ?count))
 
 8. Clj fn can be used as operations together with cascalog operators.
    When given output variables, it is a map operation.
   (defn lowercase [w] (.toLowerCase w)) 
   (?<- (stdout) [?word ?count] 
-    (sentence ?s) (split ?s :> ?word1)
-    (lowercase ?word1 :> ?word) (c/count ?count))  
+    (sentence ?s) 
+    (split ?s :> ?word1)
+    (lowercase ?word1 :> ?word) 
+    (c/count ?count))  
 
   (defn agebucket [age] 
     (find-first (partial <= age) [17 25 35 45 55 65 100 200]))
   (?<- (stdout) [?bucket ?gender ?count] 
-    (age ?person ?age) (gender ?person ?gender)
-    (agebucket ?age :> ?bucket) (c/count ?count))
+    (age ?person ?age) 
+    (gender ?person ?gender)
+    (agebucket ?age :> ?bucket) 
+    (c/count ?count))
 
 9. subqueries defined inside let
   1. all the follow relationships in which both people follow more than 2 people.
@@ -196,4 +220,12 @@ After start, bring in playground and bootstrap it.
     (age _ ?a))
   (?<- (stdout) [?a] 
     (age _ ?a) (:distinct false))
+
+
+## An Example shows how to rank a message in your news network.
+
+The question is, how to rank the millions of messages pushed to your news network?
+1. timestamp, 2. the closeness, importance, crediability of the source.
+  message_rank = fn(#_of_followers_of_origin, timestamp, closeness, heuristic);
+
 
