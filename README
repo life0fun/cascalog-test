@@ -6,14 +6,34 @@ A simple project to experiment cascalogs
 
 To start repl that will install all dependencies
   sublime project.clj and then Tools->Clojure->Clojure, not Clojure-Telnet.
+
   lein repl
 
-After start, bring in playground and bootstrap it.
-  (use 'cascalog.playground) (bootstrap)
+After start, bring in playground and cascalog logic ops.
+  (use 'cascalog.api)
+  (use 'cascalog.playground)
+
+  (require '[cascalog.logic.def :as def])
+  (require '[cascalog.logic.ops :as c])
+  (require '[clojure.contrib.seq-utils :as seq-utils])
+
 
 ## Query Examples
 
 Examples are based on Nathan's cascalog tutorial.
+
+1. collections defined in cascalog-core/src/clj/cascalog/playground.clj
+   user=> sentence
+      [["Four score an ..."] ["xxx"]]
+    user=> person
+      [["alice"] ["bob"] ... ]
+    user=> age
+      [["alice" 28] ["bob" 33] ["chris" 40] ["david" 25]
+    user=> follows
+      [["alice" "david"] ["alice" "bob"]
+    user=> gender
+      [["alice" "f"] ["bob" "m"]
+
 
 1. select person
    from person join follows on (person.person = follows.person-followed)
@@ -21,7 +41,7 @@ Examples are based on Nathan's cascalog tutorial.
    where gender = 'm' and follows.person-follower = 'emily'
 
   (?<- (stdout) [?person] 
-    (follows "emily" ?person)  ; subquery equality by interpolate with hard coded val
+    (follows "emily" ?person)
     (gender ?person "m"))
 
 2. select person, age, country
@@ -52,9 +72,6 @@ Examples are based on Nathan's cascalog tutorial.
 
 
 5. Aggregator
-  select count(age)
-  from age 
-  where age < 30
 
   (?<- (stdout) [?count] 
     (age _ ?age) (< ?age 30)
@@ -103,8 +120,14 @@ Examples are based on Nathan's cascalog tutorial.
     (split ?s :> ?word) 
     (c/count ?count))
 
-8. Clj fn can be used as operations together with cascalog operators.
+  (let [counter (<- [?word ?count] (sentence ?s) (split ?s :> ?word) (c/count ?count))]
+    (?- (stdout)
+      (c/first-n counter 10 :sort ["?count"] :reverse true)))
+
+
+8. clj fn can be used as operations together with cascalog operators.
    When given output variables, it is a map operation.
+
   (defn lowercase [w] (.toLowerCase w)) 
   (?<- (stdout) [?word ?count] 
     (sentence ?s) 
@@ -112,8 +135,10 @@ Examples are based on Nathan's cascalog tutorial.
     (lowercase ?word1 :> ?word) 
     (c/count ?count))  
 
+  ; bucket with clojure.contrib.seq-utils
   (defn agebucket [age] 
-    (find-first (partial <= age) [17 25 35 45 55 65 100 200]))
+    (seq-utils/find-first (partial <= age) [17 25 35 45 55 65 100 200]))
+
   (?<- (stdout) [?bucket ?gender ?count] 
     (age ?person ?age) 
     (gender ?person ?gender)
@@ -124,7 +149,7 @@ Examples are based on Nathan's cascalog tutorial.
   1. all the follow relationships in which both people follow more than 2 people.
 
   (let [many-follows (<- [?person] 
-                        (follows ?person _)   ; aggregate count of all followers
+                        (follows ?person _)
                         (c/count ?c) (> ?c 2))]
     (?<- (stdout) [?person1 ?person2] 
       (many-follows ?person1)
@@ -146,7 +171,6 @@ Examples are based on Nathan's cascalog tutorial.
       (stdout) 
         active-follows))
 
-
 11. outer-join
   Outer-joins are triggered by vars that begin with !!, ungrounded variables.
   Joining two ungrounded vars causes full outer join, while joining ground vars to ungrounded vars triggers left outer join or right outer join.
@@ -154,6 +178,7 @@ Examples are based on Nathan's cascalog tutorial.
   (?<- (stdout) [?person1 !!person2]
     (person ?person1) 
     (follows ?person1 !!person2))   ; person2 var can have null value. left join.
+
 
 12. To find person who does NOT have follower
 
@@ -172,7 +197,7 @@ Examples are based on Nathan's cascalog tutorial.
     Combiner is map side aggregation and can be performed in parallel.
 
     ; def customized aggregator, its like reducer, reduce based on tot and cursor.
-    (defaggregateop product
+    (defaggregatefn product
       ([] 1)
       ([total val] (* total val))
       ([total] [total]))
@@ -198,7 +223,7 @@ Examples are based on Nathan's cascalog tutorial.
 16. Sorting
   Aggregator receive tuples in random order. use :sort predicate to sort.
 
-  (defbufferop first-tuple [tuples] 
+  (defbufferfn first-tuple [tuples] 
     (take 1 tuples))
 
   (?<- (stdout) [?person ?youngest] 

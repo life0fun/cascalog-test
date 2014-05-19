@@ -1,6 +1,10 @@
-(defproject wordcount "1.0.0-SNAPSHOT"
+(defproject cascalog-test "1.0.0-SNAPSHOT"
   :description "cascalog testing"
   :dependencies [
-  	[org.clojure/clojure "1.3.0"]
-  	[cascalog "1.10.1"]]
-  :dev-dependencies [[org.apache.hadoop/hadoop-core "0.20.2-dev"]])
+  	[org.clojure/clojure "1.5.0"]
+        [org.clojure/clojure-contrib "1.2.0"]
+  	[cascalog "2.0.0"]]
+  :jvm-opts ^:replace ["-Xms768m" "-Xmx768m"]
+  :profiles { 
+    :dev {:dependencies [[org.apache.hadoop/hadoop-core "1.1.2"]]}}
+  )
